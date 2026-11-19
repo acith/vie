@@ -56,6 +56,13 @@ pub enum Popup {
     },
 }
 
+#[derive(Debug, Clone)]
+pub enum PendingAction {
+    EditText(PathBuf),
+    PlayAudio(PathBuf),
+    PlayVideo(PathBuf),
+}
+
 #[derive(Clone)]
 pub enum ImageState {
     Empty,
@@ -69,6 +76,7 @@ pub struct App {
     pub should_quit: bool,
     pub needs_terminal_clear: bool,
     pub protocol_type: ProtocolType,
+    pub pending_action: Option<PendingAction>,
 
     // Browser state
     pub current_dir: PathBuf,
@@ -77,6 +85,7 @@ pub struct App {
     pub parent_entries: Vec<FileEntry>,
     pub parent_selected: Option<usize>,
     pub preview_dir_entries: Vec<FileEntry>,
+    pub text_preview: Option<Vec<String>>,
     pub filter_mode: FilterMode,
     pub show_hidden: bool,
     pub dir_history: HashMap<PathBuf, PathBuf>,
@@ -123,13 +132,15 @@ impl App {
             should_quit: false,
             needs_terminal_clear: false,
             protocol_type,
+            pending_action: None,
             current_dir,
             entries: Vec::new(),
             selected: 0,
             parent_entries: Vec::new(),
             parent_selected: None,
             preview_dir_entries: Vec::new(),
-            filter_mode: FilterMode::ImagesAndDirs,
+            text_preview: None,
+            filter_mode: FilterMode::AllFiles,
             show_hidden: false,
             dir_history: HashMap::new(),
             selected_paths: HashSet::new(),
@@ -230,6 +241,7 @@ impl App {
     fn on_selection_changed(&mut self) {
         self.record_history();
         self.preview_dir_entries.clear();
+        self.text_preview = None;
 
         if let Some(entry) = self.selected_entry().cloned() {
             if entry.is_dir {
@@ -244,10 +256,15 @@ impl App {
                 if let Some(size) = self.last_render_size {
                     self.ensure_image_loaded(size);
                 }
-            } else if !matches!(self.image_state, ImageState::Empty) {
-                self.image_state = ImageState::Empty;
-                self.requested_key = None;
-                self.needs_terminal_clear = true;
+            } else {
+                if !matches!(self.image_state, ImageState::Empty) {
+                    self.image_state = ImageState::Empty;
+                    self.requested_key = None;
+                    self.needs_terminal_clear = true;
+                }
+                if !entry.is_audio && !entry.is_video {
+                    self.text_preview = fs::read_text_preview(&entry.path, 80, 16384);
+                }
             }
         } else if !matches!(self.image_state, ImageState::Empty) {
             self.image_state = ImageState::Empty;
@@ -317,6 +334,14 @@ impl App {
             self.reload_directories(None);
         } else if entry.is_image {
             self.enter_viewer_for_path(&entry.path);
+        } else if entry.is_audio {
+            self.pending_action = Some(PendingAction::PlayAudio(entry.path));
+        } else if entry.is_video {
+            self.pending_action = Some(PendingAction::PlayVideo(entry.path));
+        } else if fs::is_text_file(&entry.path) {
+            self.pending_action = Some(PendingAction::EditText(entry.path));
+        } else {
+            self.set_info("Binary file (not an image, text, audio, or video)");
         }
     }
 
@@ -806,6 +831,10 @@ mod tests {
         let loader = ImageLoader::new(picker.clone());
         let mut app = App::new(tmp.clone(), loader, picker.protocol_type());
 
+        assert_eq!(app.filter_mode, FilterMode::AllFiles);
+        assert_eq!(app.entries.len(), 5);
+
+        app.toggle_filter();
         assert_eq!(app.filter_mode, FilterMode::ImagesAndDirs);
         let names: Vec<&str> = app.entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, vec!["sub_folder", "1.webp", "2.jpg", "10.avif"]);
@@ -817,7 +846,6 @@ mod tests {
 
         app.toggle_filter();
         assert_eq!(app.filter_mode, FilterMode::AllFiles);
-        assert_eq!(app.entries.len(), 5);
 
         app.toggle_filter();
         assert_eq!(app.filter_mode, FilterMode::ImagesAndDirs);

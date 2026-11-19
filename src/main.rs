@@ -3,10 +3,12 @@ mod fs;
 mod fs_ops;
 mod image_loader;
 mod input;
+mod media;
 mod ui;
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -20,7 +22,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use ratatui_image::picker::{Picker, ProtocolType};
 
-use crate::app::App;
+use crate::app::{App, PendingAction};
 use crate::image_loader::ImageLoader;
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -35,7 +37,7 @@ enum CliProtocol {
 #[derive(Parser, Debug)]
 #[command(
     name = "vie",
-    version = "0.10",
+    version = "0.11",
     about = "Fast Yazi-style terminal image viewer (supports Ghostty/Kitty, Foot/Sixel, iTerm2, Halfblocks)"
 )]
 struct Cli {
@@ -60,6 +62,31 @@ fn restore_terminal(protocol_type: Option<ProtocolType>) {
     }
     let _ = disable_raw_mode();
     let _ = execute!(io::stdout(), LeaveAlternateScreen);
+}
+
+fn edit_file_with_vi(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    protocol_type: ProtocolType,
+    path: &Path,
+) -> Result<()> {
+    restore_terminal(Some(protocol_type));
+
+    let status = Command::new("vi").arg(path).status();
+
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen)?;
+    enable_raw_mode()?;
+    terminal.clear()?;
+
+    // Drain any buffered key events left over after returning from vi
+    while event::poll(Duration::from_millis(0))? {
+        let _ = event::read()?;
+    }
+
+    if let Err(err) = status {
+        return Err(anyhow::anyhow!("Failed to launch vi: {err}"));
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -90,10 +117,10 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let loader = ImageLoader::new(picker);
+    let loader = ImageLoader::new(picker.clone());
     let mut app = App::new(cli.path, loader, protocol_type);
 
-    let res = run_loop(&mut terminal, &mut app);
+    let res = run_loop(&mut terminal, &mut app, &picker);
 
     restore_terminal(Some(protocol_type));
     res
@@ -102,10 +129,39 @@ fn main() -> Result<()> {
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    picker: &Picker,
 ) -> Result<()> {
     let mut needs_redraw = true;
 
     loop {
+        if let Some(action) = app.pending_action.take() {
+            if app.protocol_type == ProtocolType::Kitty {
+                clear_kitty_graphics();
+            }
+            match action {
+                PendingAction::EditText(path) => {
+                    if let Err(err) = edit_file_with_vi(terminal, app.protocol_type, &path) {
+                        app.set_error(err.to_string());
+                    } else {
+                        app.reload_directories(Some(&path));
+                    }
+                }
+                PendingAction::PlayAudio(path) => {
+                    if let Err(err) = media::play_audio(terminal, &path) {
+                        app.set_error(err);
+                    }
+                }
+                PendingAction::PlayVideo(path) => {
+                    if let Err(err) = media::play_video(terminal, picker, &path) {
+                        app.set_error(err);
+                    }
+                }
+            }
+            app.requested_key = None;
+            app.needs_terminal_clear = true;
+            needs_redraw = true;
+        }
+
         if app.needs_terminal_clear {
             if app.protocol_type == ProtocolType::Kitty {
                 clear_kitty_graphics();

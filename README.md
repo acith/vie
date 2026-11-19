@@ -28,8 +28,11 @@
 
 ### Features
 - **Dual-Mode Interface:**
-  - **Browser Mode:** Split-pane directory browser with live image preview and image metadata.
+  - **Browser Mode:** 3-column Yazi-style directory browser (shows all files by default) with live image preview, text file preview with line numbers, and image metadata.
   - **Fullscreen Viewer Mode:** Distraction-free fullscreen image viewing with quick next/prev navigation and toggleable status bar.
+- **Text Editing & In-Terminal Media Playback:**
+  - **Text Files:** Live text preview in the right column; press `Enter` (`l` / `→`) to open the file in `vi` and return directly to `vie` when exiting `vi`.
+  - **Audio & Video (`.mp3`, `.mp4`, etc.):** Press `Enter` (`l` / `→`) to play audio or video directly inside the terminal screen (`q` / `Esc` stops playback and returns to the browser).
 - **Multi-Protocol Terminal Graphics:**
   - Automatically detects the best supported graphics protocol (`Kitty` / `Ghostty`, `Sixel` / `Foot`, `iTerm2`, or `Halfblocks` fallback), or lets you force one via `--protocol`.
 - **Asynchronous Image Engine:**
@@ -48,7 +51,7 @@ Download the latest prebuilt binary for your OS (Linux, macOS, Windows) from the
 
 ```bash
 # Example for Linux (x86_64 static binary)
-tar -xzf vie-v0.10-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.11-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```
@@ -130,8 +133,11 @@ vie -p sixel /path/to/photos
 
 ### คุณสมบัติเด่น (Features)
 - **การทำงาน 2 โหมด:**
-  - **Browser Mode:** หน้าจอแบ่ง 2 ฝั่ง (รายการไฟล์ฝั่งซ้าย + พรีวิวรูปภาพและข้อมูลขนาดภาพฝั่งขวา)
+  - **Browser Mode:** หน้าจอ 3 คอลัมน์สไตล์ Yazi (แสดงไฟล์ทั้งหมดเป็นค่าเริ่มต้น) พร้อมพรีวิวรูปภาพ พรีวิวเนื้อหาไฟล์ข้อความ (Text Preview) และข้อมูลขนาดภาพฝั่งขวา
   - **Fullscreen Viewer Mode:** โหมดดูรูปภาพเต็มหน้าจอ เลื่อนดูรูปถัดไป/ก่อนหน้าได้รวดเร็ว พร้อมซ่อน/แสดงแถบสถานะได้ (`i`)
+- **แก้ไขไฟล์ Text ด้วย `vi` และเล่นไฟล์ `.mp3` / `.mp4` ใน Terminal:**
+  - **Text File:** แสดงพรีวิวข้อความในคอลัมน์ขวา และกด `Enter` (`l` / `→`) เพื่อเปิดแก้ไขไฟล์ด้วย `vi` ทันที เมื่อออกจาก `vi` จะกลับเข้าหน้าจอ Explorer ของ `vie` เหมือนเดิม
+  - **ไฟล์เสียงและวิดีโอ (`.mp3`, `.mp4` ฯลฯ):** กด `Enter` (`l` / `→`) เพื่อเล่นเสียงหรือวิดีโอภายในหน้าจอ Terminal โดยตรง (กด `q` / `Esc` เพื่อหยุดเล่นแล้วกลับสู่หน้า Explorer)
 - **รองรับโปรโตคอลกราฟิกบน Terminal ครบครัน:**
   - ตรวจจับโปรโตคอลอัตโนมัติ (`Kitty` / `Ghostty`, `Sixel` / `Foot`, `iTerm2`, หรือ `Halfblocks`) และสามารถระบุบังคับผ่าน `--protocol` ได้
 - **ระบบโหลดรูปภาพแบบ Asynchronous:**
@@ -147,7 +153,7 @@ vie -p sixel /path/to/photos
 
 ```bash
 # ตัวอย่างสำหรับ Linux (x86_64 Static Binary รันได้ทุก Distro)
-tar -xzf vie-v0.10-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.11-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```

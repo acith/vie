@@ -205,6 +205,67 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
     }
 
     if !entry.is_image {
+        if entry.is_audio || entry.is_video {
+            let media_kind = if entry.is_audio {
+                "🎵 Audio file"
+            } else {
+                "🎬 Video file"
+            };
+            let info = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    entry.name.as_str(),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(format!("Type: {media_kind}")),
+                Line::from(format!("Size: {}", fs::format_size(entry.size))),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Press Enter (or l / →) to play in terminal",
+                    Style::default().fg(Color::Yellow),
+                )),
+            ]);
+            frame.render_widget(info, area);
+            return;
+        }
+
+        if let Some(ref text_lines) = app.text_preview {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(area);
+
+            let max_rows = chunks[0].height as usize;
+            let mut rendered: Vec<Line> = Vec::with_capacity(max_rows);
+            if text_lines.is_empty() {
+                rendered.push(Line::from(Span::styled(
+                    "  (Empty text file)",
+                    Style::default().fg(Color::DarkGray),
+                )));
+            } else {
+                for (i, line) in text_lines.iter().take(max_rows).enumerate() {
+                    rendered.push(Line::from(vec![
+                        Span::styled(
+                            format!("{:>3} │ ", i + 1),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(line.as_str(), Style::default().fg(Color::White)),
+                    ]));
+                }
+            }
+
+            frame.render_widget(Paragraph::new(rendered), chunks[0]);
+            let meta = Paragraph::new(format!(
+                " Text File ({}) — Press Enter to edit in vi ",
+                fs::format_size(entry.size)
+            ))
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center);
+            frame.render_widget(meta, chunks[1]);
+            return;
+        }
+
         let info = Paragraph::new(vec![
             Line::from(Span::styled(
                 entry.name.as_str(),
@@ -212,7 +273,7 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
             )),
             Line::from(format!("Size: {}", fs::format_size(entry.size))),
             Line::from(Span::styled(
-                "Not a supported image format",
+                "Binary / Unsupported preview format",
                 Style::default().fg(Color::DarkGray),
             )),
         ]);
@@ -450,8 +511,10 @@ fn current_entry_item(entry: &FileEntry, app: &App) -> ListItem<'static> {
         )
     } else if entry.is_image {
         ("", Style::default().fg(Color::White))
+    } else if entry.is_audio || entry.is_video {
+        ("", Style::default().fg(Color::Magenta))
     } else {
-        ("", Style::default().fg(Color::DarkGray))
+        ("", Style::default().fg(Color::Gray))
     };
 
     let name_style = if is_selected {
