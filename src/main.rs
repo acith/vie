@@ -37,7 +37,7 @@ enum CliProtocol {
 #[derive(Parser, Debug)]
 #[command(
     name = "vie",
-    version = "0.11",
+    version = "0.12",
     about = "Fast Yazi-style terminal image viewer (supports Ghostty/Kitty, Foot/Sixel, iTerm2, Halfblocks)"
 )]
 struct Cli {

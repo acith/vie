@@ -73,7 +73,22 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
             format!("  [{}]{hidden_badge}", app.filter_mode.label()),
             Style::default().fg(Color::Yellow),
         ),
+        Span::styled(
+            format!("  [{}]", app.sort_config.label()),
+            Style::default().fg(Color::Magenta),
+        ),
     ];
+
+    if let Some(ref nf) = app.name_filter {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!(" Filter: {nf} "),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     if !app.selected_paths.is_empty() {
         spans.push(Span::styled(
@@ -147,10 +162,14 @@ fn render_current_pane(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(block, area);
 
     if app.entries.is_empty() {
-        let hint = match app.filter_mode {
-            FilterMode::DirsOnly => "No folders (press 'f' to show images)",
-            FilterMode::ImagesAndDirs => "No folders or images (press 'f' for all files)",
-            FilterMode::AllFiles => "Empty directory (press 'a' to create)",
+        let hint = if app.name_filter.is_some() {
+            "No matching files (press Esc to clear filter)"
+        } else {
+            match app.filter_mode {
+                FilterMode::DirsOnly => "No folders (press 't' to switch file type)",
+                FilterMode::ImagesAndDirs => "No folders or images (press 't' for all files)",
+                FilterMode::AllFiles => "Empty directory (press 'a' to create)",
+            }
         };
         let empty = Paragraph::new(hint)
             .style(Style::default().fg(Color::DarkGray))
@@ -336,6 +355,24 @@ fn render_preview_pane(frame: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    if app.pending_comma {
+        let line = Line::from(vec![
+            Span::styled(
+                " SORT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " n/N:Natural  a/A:Alpha  m/M:Modified  s/S:Size  e/E:Ext  d:Dirs-first  Esc:cancel",
+                Style::default().fg(Color::Yellow),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
     if let Some((ref msg, is_error)) = app.status_message {
         let style = if is_error {
             Style::default()
@@ -383,7 +420,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::raw(selected_info),
     ]);
 
-    let hints = "a:add r:ren y/x/p:cp/mv d/D:del Spc:sel /:find f:flt q:quit ";
+    let hints = ",:sort f:flt /:find s:srch t:type y/x/p d/D q:quit ";
     let right = Line::from(Span::styled(hints, Style::default().fg(Color::DarkGray)));
 
     let hint_len = hints.len() as u16;
@@ -460,6 +497,91 @@ fn render_popup(frame: &mut Frame, app: &App, area: Rect) {
             .wrap(Wrap { trim: true });
 
             frame.render_widget(text, inner);
+        }
+        Popup::RecursiveSearch {
+            query,
+            cursor,
+            results,
+            selected,
+        } => {
+            let popup_w = area.width.saturating_sub(8).min(88).max(40);
+            let popup_h = area.height.saturating_sub(6).min(20).max(8);
+            let rect = center_rect(area, Size::new(popup_w, popup_h));
+
+            frame.render_widget(Clear, rect);
+            let title = format!(" Search Recursive ({} match(es)) — ↑/↓:select Enter:jump ", results.len());
+            let block = Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(1), Constraint::Length(1), Constraint::Min(1)])
+                .split(inner);
+
+            let input_line = Line::from(vec![
+                Span::styled(
+                    "> ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(query.as_str(), Style::default().fg(Color::White)),
+            ]);
+            frame.render_widget(Paragraph::new(input_line), chunks[0]);
+
+            let sep = "─".repeat(chunks[1].width as usize);
+            frame.render_widget(
+                Paragraph::new(sep).style(Style::default().fg(Color::DarkGray)),
+                chunks[1],
+            );
+
+            if results.is_empty() {
+                let empty = Paragraph::new("No matching files found")
+                    .style(Style::default().fg(Color::DarkGray))
+                    .alignment(Alignment::Center);
+                frame.render_widget(empty, chunks[2]);
+            } else {
+                let items: Vec<ListItem> = results
+                    .iter()
+                    .map(|hit| {
+                        let (suffix, style) = if hit.is_dir {
+                            (
+                                "/",
+                                Style::default()
+                                    .fg(Color::LightBlue)
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                        } else if hit.is_image {
+                            ("", Style::default().fg(Color::White))
+                        } else if hit.is_audio || hit.is_video {
+                            ("", Style::default().fg(Color::Magenta))
+                        } else {
+                            ("", Style::default().fg(Color::Gray))
+                        };
+                        ListItem::new(Line::from(Span::styled(
+                            format!(" {}{suffix}", hit.rel_path),
+                            style,
+                        )))
+                    })
+                    .collect();
+
+                let list = List::new(items).highlight_style(
+                    Style::default()
+                        .bg(Color::Cyan)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD),
+                );
+                let mut state = ListState::default();
+                state.select(Some(*selected));
+                frame.render_stateful_widget(list, chunks[2], &mut state);
+            }
+
+            let cursor_x = chunks[0].x + 2 + (*cursor as u16).min(chunks[0].width.saturating_sub(3));
+            frame.set_cursor_position(Position::new(cursor_x, chunks[0].y));
         }
         Popup::None => {}
     }

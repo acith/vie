@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-use crate::app::{App, ClipboardMode, Mode, Popup};
+use crate::app::{App, ClipboardMode, InputKind, Mode, Popup};
+use crate::fs::SortBy;
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     if key.kind == KeyEventKind::Release {
@@ -29,56 +30,176 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn handle_popup_key(app: &mut App, key: KeyEvent) {
+    let mut trigger_live_filter = false;
+    let mut trigger_recursive_update = false;
+
     match &mut app.popup {
-        Popup::Input { value, cursor, .. } => match key.code {
-            KeyCode::Esc => app.close_popup(),
-            KeyCode::Enter => app.submit_popup(),
-            KeyCode::Left => {
-                *cursor = cursor.saturating_sub(1);
-            }
-            KeyCode::Right => {
-                let max = value.chars().count();
-                if *cursor < max {
-                    *cursor += 1;
+        Popup::Input {
+            kind,
+            value,
+            cursor,
+            ..
+        } => {
+            let is_filter = *kind == InputKind::Filter;
+            match key.code {
+                KeyCode::Esc => {
+                    app.close_popup();
+                    return;
                 }
-            }
-            KeyCode::Home => *cursor = 0,
-            KeyCode::End => *cursor = value.chars().count(),
-            KeyCode::Backspace => {
-                if *cursor > 0 {
-                    let remove_idx = *cursor - 1;
-                    if let Some((byte_idx, _)) = value.char_indices().nth(remove_idx) {
-                        value.remove(byte_idx);
-                        *cursor -= 1;
+                KeyCode::Enter => {
+                    app.submit_popup();
+                    return;
+                }
+                KeyCode::Left => {
+                    *cursor = cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    let max = value.chars().count();
+                    if *cursor < max {
+                        *cursor += 1;
                     }
                 }
-            }
-            KeyCode::Delete => {
-                if let Some((byte_idx, _)) = value.char_indices().nth(*cursor) {
-                    value.remove(byte_idx);
+                KeyCode::Home => *cursor = 0,
+                KeyCode::End => *cursor = value.chars().count(),
+                KeyCode::Backspace => {
+                    if *cursor > 0 {
+                        let remove_idx = *cursor - 1;
+                        if let Some((byte_idx, _)) = value.char_indices().nth(remove_idx) {
+                            value.remove(byte_idx);
+                            *cursor -= 1;
+                            trigger_live_filter = is_filter;
+                        }
+                    }
                 }
+                KeyCode::Delete => {
+                    if let Some((byte_idx, _)) = value.char_indices().nth(*cursor) {
+                        value.remove(byte_idx);
+                        trigger_live_filter = is_filter;
+                    }
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let byte_idx = value
+                        .char_indices()
+                        .nth(*cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(value.len());
+                    value.insert(byte_idx, c);
+                    *cursor += 1;
+                    trigger_live_filter = is_filter;
+                }
+                _ => {}
             }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let byte_idx = value
-                    .char_indices()
-                    .nth(*cursor)
-                    .map(|(i, _)| i)
-                    .unwrap_or(value.len());
-                value.insert(byte_idx, c);
-                *cursor += 1;
-            }
-            _ => {}
-        },
+        }
         Popup::Confirm { .. } => match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => app.submit_popup(),
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => app.close_popup(),
             _ => {}
         },
+        Popup::RecursiveSearch { query, cursor, .. } => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('n') | KeyCode::Char('j') => app.recursive_search_move(1),
+                    KeyCode::Char('p') | KeyCode::Char('k') => app.recursive_search_move(-1),
+                    _ => {}
+                }
+                return;
+            }
+            match key.code {
+                KeyCode::Esc => {
+                    app.close_popup();
+                    return;
+                }
+                KeyCode::Enter => {
+                    app.submit_popup();
+                    return;
+                }
+                KeyCode::Down | KeyCode::Tab => {
+                    app.recursive_search_move(1);
+                    return;
+                }
+                KeyCode::Up | KeyCode::BackTab => {
+                    app.recursive_search_move(-1);
+                    return;
+                }
+                KeyCode::PageDown => {
+                    app.recursive_search_move(10);
+                    return;
+                }
+                KeyCode::PageUp => {
+                    app.recursive_search_move(-10);
+                    return;
+                }
+                KeyCode::Left => {
+                    *cursor = cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    let max = query.chars().count();
+                    if *cursor < max {
+                        *cursor += 1;
+                    }
+                }
+                KeyCode::Home => *cursor = 0,
+                KeyCode::End => *cursor = query.chars().count(),
+                KeyCode::Backspace => {
+                    if *cursor > 0 {
+                        let remove_idx = *cursor - 1;
+                        if let Some((byte_idx, _)) = query.char_indices().nth(remove_idx) {
+                            query.remove(byte_idx);
+                            *cursor -= 1;
+                            trigger_recursive_update = true;
+                        }
+                    }
+                }
+                KeyCode::Delete => {
+                    if let Some((byte_idx, _)) = query.char_indices().nth(*cursor) {
+                        query.remove(byte_idx);
+                        trigger_recursive_update = true;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    let byte_idx = query
+                        .char_indices()
+                        .nth(*cursor)
+                        .map(|(i, _)| i)
+                        .unwrap_or(query.len());
+                    query.insert(byte_idx, c);
+                    *cursor += 1;
+                    trigger_recursive_update = true;
+                }
+                _ => {}
+            }
+        }
         Popup::None => {}
+    }
+
+    if trigger_live_filter {
+        app.apply_live_filter_from_popup();
+    }
+    if trigger_recursive_update {
+        app.update_recursive_search();
     }
 }
 
 fn handle_browser_key(app: &mut App, key: KeyEvent) {
+    if app.pending_comma {
+        app.pending_comma = false;
+        match key.code {
+            KeyCode::Char('n') => app.set_sort(SortBy::Natural, false),
+            KeyCode::Char('N') => app.set_sort(SortBy::Natural, true),
+            KeyCode::Char('a') => app.set_sort(SortBy::Alphabetical, false),
+            KeyCode::Char('A') => app.set_sort(SortBy::Alphabetical, true),
+            KeyCode::Char('m') => app.set_sort(SortBy::Modified, true),
+            KeyCode::Char('M') => app.set_sort(SortBy::Modified, false),
+            KeyCode::Char('s') => app.set_sort(SortBy::Size, true),
+            KeyCode::Char('S') => app.set_sort(SortBy::Size, false),
+            KeyCode::Char('e') => app.set_sort(SortBy::Extension, false),
+            KeyCode::Char('E') => app.set_sort(SortBy::Extension, true),
+            KeyCode::Char('d') => app.toggle_dirs_first(),
+            _ => {}
+        }
+        return;
+    }
+
     if app.pending_g {
         app.pending_g = false;
         if key.code == KeyCode::Char('g') {
@@ -111,8 +232,15 @@ fn handle_browser_key(app: &mut App, key: KeyEvent) {
         KeyCode::Home => app.jump_top(),
         KeyCode::Char('G') | KeyCode::End => app.jump_bottom(),
 
-        // Filter & hidden
-        KeyCode::Char('f') => app.toggle_filter(),
+        // Yazi-style sort menu, type filter, live name filter, find & recursive search
+        KeyCode::Char(',') => app.pending_comma = true,
+        KeyCode::Char('t') => app.toggle_filter(),
+        KeyCode::Char('f') => app.open_filter_popup(),
+        KeyCode::Char('/') => app.open_find_popup(true),
+        KeyCode::Char('?') => app.open_find_popup(false),
+        KeyCode::Char('n') => app.search_next(true),
+        KeyCode::Char('N') => app.search_next(false),
+        KeyCode::Char('s') => app.open_recursive_search_popup(),
         KeyCode::Char('.') => app.toggle_hidden(),
 
         // Yazi-style selection & file/folder management
@@ -126,11 +254,6 @@ fn handle_browser_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('r') => app.open_rename_popup(),
         KeyCode::Char('d') => app.open_delete_popup(false),
         KeyCode::Char('D') => app.open_delete_popup(true),
-
-        // Search in current directory
-        KeyCode::Char('/') => app.open_search_popup(),
-        KeyCode::Char('n') => app.search_next(true),
-        KeyCode::Char('N') => app.search_next(false),
 
         _ => {}
     }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use ratatui::layout::Size;
 use ratatui_image::picker::ProtocolType;
 
-use crate::fs::{self, FileEntry, FilterMode};
+use crate::fs::{self, FileEntry, FilterMode, SearchHit, SortBy, SortConfig};
 use crate::fs_ops;
 use crate::image_loader::{ImageLoader, LoadResult, LoadedImage};
 
@@ -26,11 +26,13 @@ pub struct Clipboard {
     pub paths: HashSet<PathBuf>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputKind {
     Create,
     Rename(PathBuf),
-    Search,
+    FindForward,
+    FindBackward,
+    Filter,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,12 @@ pub enum Popup {
         kind: ConfirmKind,
         title: String,
         message: String,
+    },
+    RecursiveSearch {
+        query: String,
+        cursor: usize,
+        results: Vec<SearchHit>,
+        selected: usize,
     },
 }
 
@@ -80,6 +88,7 @@ pub struct App {
 
     // Browser state
     pub current_dir: PathBuf,
+    pub all_entries: Vec<FileEntry>,
     pub entries: Vec<FileEntry>,
     pub selected: usize,
     pub parent_entries: Vec<FileEntry>,
@@ -87,6 +96,8 @@ pub struct App {
     pub preview_dir_entries: Vec<FileEntry>,
     pub text_preview: Option<Vec<String>>,
     pub filter_mode: FilterMode,
+    pub name_filter: Option<String>,
+    pub sort_config: SortConfig,
     pub show_hidden: bool,
     pub dir_history: HashMap<PathBuf, PathBuf>,
 
@@ -109,8 +120,9 @@ pub struct App {
     pub requested_key: Option<(PathBuf, Size)>,
     pub last_render_size: Option<Size>,
 
-    // Key chord helper (for `gg`)
+    // Key chord helpers (for `gg` and `,` sort menu)
     pub pending_g: bool,
+    pub pending_comma: bool,
 }
 
 impl App {
@@ -134,6 +146,7 @@ impl App {
             protocol_type,
             pending_action: None,
             current_dir,
+            all_entries: Vec::new(),
             entries: Vec::new(),
             selected: 0,
             parent_entries: Vec::new(),
@@ -141,6 +154,8 @@ impl App {
             preview_dir_entries: Vec::new(),
             text_preview: None,
             filter_mode: FilterMode::AllFiles,
+            name_filter: None,
+            sort_config: SortConfig::default(),
             show_hidden: false,
             dir_history: HashMap::new(),
             selected_paths: HashSet::new(),
@@ -157,6 +172,7 @@ impl App {
             requested_key: None,
             last_render_size: None,
             pending_g: false,
+            pending_comma: false,
         };
 
         app.reload_directories(initial_file.as_deref());
@@ -185,7 +201,8 @@ impl App {
     pub fn reload_directories(&mut self, select_path: Option<&Path>) {
         // Parent directory
         if let Some(parent) = self.current_dir.parent() {
-            self.parent_entries = fs::read_directory(parent, self.filter_mode, self.show_hidden);
+            self.parent_entries =
+                fs::read_directory(parent, self.filter_mode, self.show_hidden, self.sort_config);
             self.parent_selected = self
                 .parent_entries
                 .iter()
@@ -196,13 +213,33 @@ impl App {
         }
 
         // Current directory
-        self.entries = fs::read_directory(&self.current_dir, self.filter_mode, self.show_hidden);
+        self.all_entries = fs::read_directory(
+            &self.current_dir,
+            self.filter_mode,
+            self.show_hidden,
+            self.sort_config,
+        );
+        self.apply_name_filter(select_path);
+    }
 
-        let desired = select_path
+    fn apply_name_filter(&mut self, select_path: Option<&Path>) {
+        let prev_selected = select_path
             .map(Path::to_path_buf)
+            .or_else(|| self.selected_entry().map(|e| e.path.clone()))
             .or_else(|| self.dir_history.get(&self.current_dir).cloned());
 
-        self.selected = desired
+        if let Some(ref query) = self.name_filter {
+            self.entries = self
+                .all_entries
+                .iter()
+                .filter(|e| fs::smart_case_contains(&e.name, query))
+                .cloned()
+                .collect();
+        } else {
+            self.entries = self.all_entries.clone();
+        }
+
+        self.selected = prev_selected
             .and_then(|p| self.entries.iter().position(|e| e.path == p))
             .unwrap_or_else(|| self.selected.min(self.entries.len().saturating_sub(1)));
 
@@ -245,8 +282,12 @@ impl App {
 
         if let Some(entry) = self.selected_entry().cloned() {
             if entry.is_dir {
-                self.preview_dir_entries =
-                    fs::read_directory(&entry.path, self.filter_mode, self.show_hidden);
+                self.preview_dir_entries = fs::read_directory(
+                    &entry.path,
+                    self.filter_mode,
+                    self.show_hidden,
+                    self.sort_config,
+                );
                 if !matches!(self.image_state, ImageState::Empty) {
                     self.image_state = ImageState::Empty;
                     self.requested_key = None;
@@ -318,6 +359,7 @@ impl App {
         if let Some(parent) = self.current_dir.parent().map(Path::to_path_buf) {
             let previous = self.current_dir.clone();
             self.record_history();
+            self.name_filter = None;
             self.current_dir = parent;
             self.reload_directories(Some(&previous));
         }
@@ -330,6 +372,7 @@ impl App {
 
         if entry.is_dir {
             self.record_history();
+            self.name_filter = None;
             self.current_dir = entry.path;
             self.reload_directories(None);
         } else if entry.is_image {
@@ -345,10 +388,33 @@ impl App {
         }
     }
 
+    // --- Yazi-style sorting ---
+
+    pub fn set_sort(&mut self, by: SortBy, reverse: bool) {
+        self.sort_config.by = by;
+        self.sort_config.reverse = reverse;
+        let current_path = self.selected_entry().map(|e| e.path.clone());
+        self.reload_directories(current_path.as_deref());
+        self.set_info(format!("Sorted by {}", self.sort_config.label()));
+    }
+
+    pub fn toggle_dirs_first(&mut self) {
+        self.sort_config.dirs_first = !self.sort_config.dirs_first;
+        let current_path = self.selected_entry().map(|e| e.path.clone());
+        self.reload_directories(current_path.as_deref());
+        let state = if self.sort_config.dirs_first {
+            "ON"
+        } else {
+            "OFF"
+        };
+        self.set_info(format!("Dirs first: {state}"));
+    }
+
     pub fn toggle_filter(&mut self) {
         let current_path = self.selected_entry().map(|e| e.path.clone());
         self.filter_mode = self.filter_mode.next();
         self.reload_directories(current_path.as_deref());
+        self.set_info(format!("Type filter: {}", self.filter_mode.label()));
     }
 
     pub fn toggle_hidden(&mut self) {
@@ -385,6 +451,13 @@ impl App {
     }
 
     pub fn clear_selection_and_clipboard(&mut self) {
+        if self.name_filter.is_some() {
+            self.name_filter = None;
+            let current_path = self.selected_entry().map(|e| e.path.clone());
+            self.apply_name_filter(current_path.as_deref());
+            self.set_info("Cleared name filter");
+            return;
+        }
         let had_something = !self.selected_paths.is_empty() || self.clipboard.is_some();
         self.selected_paths.clear();
         self.clipboard = None;
@@ -490,13 +563,101 @@ impl App {
         });
     }
 
-    pub fn open_search_popup(&mut self) {
+    pub fn open_find_popup(&mut self, forward: bool) {
+        let (kind, title) = if forward {
+            (InputKind::FindForward, " Find next (/) ".to_string())
+        } else {
+            (InputKind::FindBackward, " Find previous (?) ".to_string())
+        };
         self.open_popup(Popup::Input {
-            kind: InputKind::Search,
-            title: " Find in folder ".to_string(),
+            kind,
+            title,
             value: String::new(),
             cursor: 0,
         });
+    }
+
+    pub fn open_filter_popup(&mut self) {
+        let value = self.name_filter.clone().unwrap_or_default();
+        let cursor = value.chars().count();
+        self.open_popup(Popup::Input {
+            kind: InputKind::Filter,
+            title: " Filter files (Esc to clear) ".to_string(),
+            value,
+            cursor,
+        });
+    }
+
+    pub fn apply_live_filter_from_popup(&mut self) {
+        let query = match &self.popup {
+            Popup::Input {
+                kind: InputKind::Filter,
+                value,
+                ..
+            } => value.trim().to_string(),
+            _ => return,
+        };
+
+        self.name_filter = if query.is_empty() { None } else { Some(query) };
+        let current_path = self.selected_entry().map(|e| e.path.clone());
+        self.apply_name_filter(current_path.as_deref());
+    }
+
+    pub fn open_recursive_search_popup(&mut self) {
+        let results = fs::search_recursive(
+            &self.current_dir,
+            "",
+            self.filter_mode,
+            self.show_hidden,
+            200,
+        );
+        self.open_popup(Popup::RecursiveSearch {
+            query: String::new(),
+            cursor: 0,
+            results,
+            selected: 0,
+        });
+    }
+
+    pub fn update_recursive_search(&mut self) {
+        let query = match &self.popup {
+            Popup::RecursiveSearch { query, .. } => query.clone(),
+            _ => return,
+        };
+        let results = fs::search_recursive(
+            &self.current_dir,
+            &query,
+            self.filter_mode,
+            self.show_hidden,
+            200,
+        );
+        if let Popup::RecursiveSearch {
+            results: ref mut res,
+            selected: ref mut sel,
+            ..
+        } = self.popup
+        {
+            *res = results;
+            *sel = 0;
+        }
+    }
+
+    pub fn recursive_search_move(&mut self, delta: isize) {
+        if let Popup::RecursiveSearch {
+            results, selected, ..
+        } = &mut self.popup
+        {
+            if results.is_empty() {
+                *selected = 0;
+                return;
+            }
+            let max = results.len() - 1;
+            if delta < 0 {
+                *selected = selected.saturating_sub((-delta) as usize);
+            } else {
+                *selected = (*selected + delta as usize).min(max);
+            }
+        }
     }
 
     pub fn open_delete_popup(&mut self, permanent: bool) {
@@ -535,8 +696,21 @@ impl App {
     }
 
     pub fn close_popup(&mut self) {
+        let was_filter = matches!(
+            self.popup,
+            Popup::Input {
+                kind: InputKind::Filter,
+                ..
+            }
+        );
         self.popup = Popup::None;
         self.needs_terminal_clear = true;
+        if was_filter && self.name_filter.is_some() {
+            self.name_filter = None;
+            let current_path = self.selected_entry().map(|e| e.path.clone());
+            self.apply_name_filter(current_path.as_deref());
+            self.set_info("Cleared name filter");
+        }
     }
 
     pub fn submit_popup(&mut self) {
@@ -569,11 +743,30 @@ impl App {
                     }
                     Err(e) => self.set_error(e.to_string()),
                 },
-                InputKind::Search => {
+                InputKind::FindForward => {
                     let query = value.trim().to_string();
                     if !query.is_empty() {
                         self.last_search = Some(query);
                         self.search_next(true);
+                    }
+                }
+                InputKind::FindBackward => {
+                    let query = value.trim().to_string();
+                    if !query.is_empty() {
+                        self.last_search = Some(query);
+                        self.search_next(false);
+                    }
+                }
+                InputKind::Filter => {
+                    let query = value.trim().to_string();
+                    self.name_filter = if query.is_empty() { None } else { Some(query) };
+                    let current_path = self.selected_entry().map(|e| e.path.clone());
+                    self.apply_name_filter(current_path.as_deref());
+                    if let Some(ref q) = self.name_filter {
+                        self.set_info(format!(
+                            "Filter '{q}': {} item(s) (Esc to clear)",
+                            self.entries.len()
+                        ));
                     }
                 }
             },
@@ -599,39 +792,76 @@ impl App {
                     Err(e) => self.set_error(e.to_string()),
                 },
             },
+            Popup::RecursiveSearch {
+                results, selected, ..
+            } => {
+                if let Some(hit) = results.get(selected) {
+                    let target = hit.path.clone();
+                    if let Some(parent) = target.parent().map(Path::to_path_buf) {
+                        self.record_history();
+                        self.name_filter = None;
+                        self.current_dir = parent;
+                        self.reload_directories(Some(&target));
+                        self.set_info(format!("Jumped to: {}", hit.rel_path));
+                    }
+                }
+            }
             Popup::None => {}
         }
     }
 
     pub fn search_next(&mut self, forward: bool) {
-        let Some(query) = self.last_search.as_ref().map(|q| q.to_lowercase()) else {
+        let Some(query) = self.last_search.clone() else {
             return;
         };
         if self.entries.is_empty() {
             return;
         }
-        let len = self.entries.len();
-        for offset in 1..=len {
-            let idx = if forward {
-                (self.selected + offset) % len
-            } else {
-                (self.selected + len - offset) % len
-            };
-            if self.entries[idx].name.to_lowercase().contains(&query) {
-                self.selected = idx;
-                self.on_selection_changed();
-                self.set_info(format!("Match: {}", self.entries[idx].name));
-                return;
-            }
+        let matches: Vec<usize> = self
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| fs::smart_case_contains(&e.name, &query))
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if matches.is_empty() {
+            self.set_error(format!("No match for '{query}'"));
+            return;
         }
-        self.set_error(format!("No match for '{query}'"));
+
+        let next_pos = if forward {
+            matches
+                .iter()
+                .position(|&idx| idx > self.selected)
+                .unwrap_or(0)
+        } else {
+            matches
+                .iter()
+                .rposition(|&idx| idx < self.selected)
+                .unwrap_or(matches.len() - 1)
+        };
+
+        let target_idx = matches[next_pos];
+        self.selected = target_idx;
+        self.on_selection_changed();
+        self.set_info(format!(
+            "Match {}/{}: {}",
+            next_pos + 1,
+            matches.len(),
+            self.entries[target_idx].name
+        ));
     }
 
     // --- Viewer navigation ---
 
     pub fn enter_viewer_for_path(&mut self, target: &Path) {
-        let all_in_dir =
-            fs::read_directory(&self.current_dir, FilterMode::ImagesAndDirs, self.show_hidden);
+        let all_in_dir = fs::read_directory(
+            &self.current_dir,
+            FilterMode::ImagesAndDirs,
+            self.show_hidden,
+            self.sort_config,
+        );
         self.viewer_images = all_in_dir.into_iter().filter(|e| e.is_image).collect();
 
         if self.viewer_images.is_empty() {
@@ -873,6 +1103,81 @@ mod tests {
         app.paste(false);
         assert_eq!(app.entries.len(), 1);
         assert_eq!(app.entries[0].name, "10.avif");
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn yazi_sorting_live_filter_and_recursive_search() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp = std::env::temp_dir().join(format!("vie_sort_search_{nanos}"));
+        fs::create_dir_all(tmp.join("nested/deep")).unwrap();
+        fs::write(tmp.join("b_small.txt"), b"hi").unwrap();
+        fs::write(tmp.join("a_large.png"), vec![0u8; 500]).unwrap();
+        fs::write(tmp.join("10_medium.md"), vec![0u8; 100]).unwrap();
+        fs::write(tmp.join("2_medium.md"), vec![0u8; 50]).unwrap();
+        fs::write(tmp.join("nested/deep/target_photo.jpg"), b"img").unwrap();
+
+        let picker = Picker::halfblocks();
+        let loader = ImageLoader::new(picker.clone());
+        let mut app = App::new(tmp.clone(), loader, picker.protocol_type());
+
+        // Default: Natural ↑ with dirs_first
+        let names: Vec<&str> = app.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["nested", "2_medium.md", "10_medium.md", "a_large.png", "b_small.txt"]
+        );
+
+        // Sort by Size descending (largest first, dirs_first still on)
+        app.set_sort(SortBy::Size, true);
+        let size_names: Vec<&str> = app.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            size_names,
+            vec!["nested", "a_large.png", "10_medium.md", "2_medium.md", "b_small.txt"]
+        );
+
+        // Sort by Extension ascending
+        app.set_sort(SortBy::Extension, false);
+        let ext_names: Vec<&str> = app.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            ext_names,
+            vec!["nested", "2_medium.md", "10_medium.md", "a_large.png", "b_small.txt"]
+        );
+
+        // Live name filter (`f`)
+        app.open_filter_popup();
+        if let Popup::Input { ref mut value, .. } = app.popup {
+            *value = "medium".to_string();
+        }
+        app.apply_live_filter_from_popup();
+        assert_eq!(app.entries.len(), 2);
+        app.submit_popup();
+        assert_eq!(app.name_filter.as_deref(), Some("medium"));
+        assert_eq!(app.entries.len(), 2);
+
+        // Clear filter via Esc
+        app.clear_selection_and_clipboard();
+        assert!(app.name_filter.is_none());
+        assert_eq!(app.entries.len(), 5);
+
+        // Recursive search (`s`)
+        app.open_recursive_search_popup();
+        if let Popup::RecursiveSearch { ref mut query, .. } = app.popup {
+            *query = "target_photo".to_string();
+        }
+        app.update_recursive_search();
+        if let Popup::RecursiveSearch { ref results, .. } = app.popup {
+            assert_eq!(results.len(), 1);
+            assert!(results[0].rel_path.ends_with("target_photo.jpg"));
+        } else {
+            panic!("Expected RecursiveSearch popup");
+        }
+        app.submit_popup();
+        assert_eq!(app.selected_entry().unwrap().name, "target_photo.jpg");
 
         let _ = fs::remove_dir_all(&tmp);
     }

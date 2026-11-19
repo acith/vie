@@ -39,7 +39,11 @@
   - Background worker thread for image decoding and resizing, LRU caching, and automatic preloading of adjacent images for instant navigation.
 - **Yazi-Style File Management:**
   - Multi-file selection, Copy (`y`), Cut (`x`), Paste (`p`/`P`), Create file or folder (`a`), Rename (`r`), Move to OS Trash (`d`), Permanent Delete (`D`), Search (`/`), and Image-only filter (`f`).
-- **Natural Sorting:** Directories first, followed by files sorted in natural alphanumeric order (`1, 2, 10` instead of `1, 10, 2`).
+- **Yazi-Style Sorting & 3-Level Search:**
+  - **Sort Menu (`,`):** `,n/N` (Natural), `,a/A` (Alphabetical), `,m/M` (Modified time), `,s/S` (Size), `,e/E` (Extension), `,d` (toggle Dirs-first) with an on-screen which-key hint bar.
+  - **Smart-Case Find (`/` / `?` + `n` / `N`):** Jump forward/backward to matching items in the current directory with match counter (`Match 2/5`).
+  - **Live Name Filter (`f`):** Filter the current directory in real time as you type (`Esc` clears filter).
+  - **Recursive Search (`s`):** Search files across all subdirectories and jump straight to the selected file.
 
 ### Supported Image Formats
 `jpg`, `jpeg`, `png`, `webp`, `gif`, `bmp`, `ico`, `tiff`, `tif`, `pnm`, `pbm`, `pgm`, `ppm`, `tga`, `dds`, `farbfeld`, `exr`, `hdr`, `qoi`, `avif`
@@ -51,7 +55,7 @@ Download the latest prebuilt binary for your OS (Linux, macOS, Windows) from the
 
 ```bash
 # Example for Linux (x86_64 static binary)
-tar -xzf vie-v0.11-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.12-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```
@@ -95,13 +99,18 @@ vie -p sixel /path/to/photos
 | `gg` / `Home` | Jump to top |
 | `G` / `End` | Jump to bottom |
 | `h` / `←` / `Backspace` | Go to parent directory |
-| `l` / `→` / `Enter` | Enter directory or open image in Fullscreen Viewer |
-| `f` | Toggle **Image-only** filter vs **All files** |
+| `l` / `→` / `Enter` | Enter directory, open image in Fullscreen Viewer, edit text file in `vi`, or play audio/video in terminal |
+| `,` + `n/N`, `a/A`, `m/M`, `s/S`, `e/E`, `d` | Yazi-style Sort menu (Natural, Alpha, Modified, Size, Extension, toggle Dirs-first) |
+| `f` | Live name filter in current directory (`Esc` to clear) |
+| `t` | Cycle file type filter (**All Files** / **Dirs+Images** / **Dirs Only**) |
+| `/` / `?` | Smart-case find forward / backward in current directory |
+| `n` / `N` | Jump to next / previous find match |
+| `s` | Recursive search across subdirectories (`↑`/`↓` to select, `Enter` to jump) |
 | `.` | Toggle hidden files (dotfiles) |
 | `Space` | Toggle selection on current item and move down |
 | `Ctrl+a` | Select all items |
 | `Ctrl+r` | Invert selection |
-| `Esc` | Clear selection and clipboard |
+| `Esc` | Clear active name filter, or clear selection and clipboard |
 | `y` | Yank (Copy) selected/hovered item(s) |
 | `x` | Cut selected/hovered item(s) |
 | `p` / `P` | Paste (`p` auto-renames on conflict, `P` overwrites) |
@@ -109,8 +118,6 @@ vie -p sixel /path/to/photos
 | `r` | Rename currently hovered item |
 | `d` | Move selected/hovered item(s) to OS Trash |
 | `D` | Permanently delete selected/hovered item(s) |
-| `/` | Search in current directory |
-| `n` / `N` | Jump to next / previous search match |
 | `q` / `Ctrl+c` | Quit |
 
 #### Fullscreen Viewer Mode
@@ -144,7 +151,11 @@ vie -p sixel /path/to/photos
   - ประมวลผลและย่อขนาดภาพใน Background Thread พร้อมระบบ LRU Cache และ Preload รูปข้างเคียงล่วงหน้า ทำให้เปิดสลับรูปได้ทันที
 - **จัดการไฟล์ครบเครื่องสไตล์ Yazi:**
   - รองรับการเลือกหลายไฟล์ (`Space`), คัดลอก (`y`), ตัด (`x`), วาง (`p`/`P`), สร้างไฟล์หรือโฟลเดอร์ใหม่ (`a`), เปลี่ยนชื่อ (`r`), ทิ้งลงถังขยะ (`d`), ลบถาวร (`D`), ค้นหาชื่อไฟล์ (`/`) และสลับกรองเฉพาะไฟล์รูปภาพ (`f`)
-- **เรียงลำดับชื่อไฟล์แบบธรรมชาติ (Natural Sort):** แสดงโฟลเดอร์ขึ้นก่อน ตามด้วยไฟล์ที่เรียงเลขอย่างถูกต้อง (เช่น `1, 2, 10` ไม่ใช่ `1, 10, 2`)
+- **ระบบ Sorting และค้นหา 3 ระดับสไตล์ Yazi:**
+  - **เมนูเรียงลำดับ (`,`):** `,n/N` (Natural), `,a/A` (Alphabetical), `,m/M` (เวลาแก้ไข), `,s/S` (ขนาดไฟล์), `,e/E` (นามสกุลไฟล์), `,d` (สลับโฟลเดอร์ขึ้นก่อน) พร้อมแถบคำใบ้ด้านล่าง
+  - **ค้นหาในโฟลเดอร์ (`/` / `?` + `n` / `N`):** ค้นหาแบบ Smart-case พร้อมแสดงลำดับที่พบ (`Match 2/5`)
+  - **กรองชื่อไฟล์แบบ Real-time (`f`):** พิมพ์เพื่อกรองรายการในโฟลเดอร์ปัจจุบันทันที (กด `Esc` เพื่อล้าง Filter)
+  - **ค้นหาข้ามโฟลเดอร์ย่อย (`s`):** ค้นหาไฟล์ทุกชั้นในโฟลเดอร์ย่อย แล้วกด `Enter` กระโดดไปที่ไฟล์นั้นทันที
 
 ### การติดตั้ง (Installation)
 
@@ -153,7 +164,7 @@ vie -p sixel /path/to/photos
 
 ```bash
 # ตัวอย่างสำหรับ Linux (x86_64 Static Binary รันได้ทุก Distro)
-tar -xzf vie-v0.11-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.12-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```
@@ -197,13 +208,18 @@ vie -p sixel /path/to/photos
 | `gg` / `Home` | ไปยังรายการแรกสุด |
 | `G` / `End` | ไปยังรายการสุดท้าย |
 | `h` / `←` / `Backspace` | ย้อนกลับไปยังโฟลเดอร์แม่ (Parent Directory) |
-| `l` / `→` / `Enter` | เข้าไปในโฟลเดอร์ หรือเปิดดูรูปภาพแบบเต็มหน้าจอ |
-| `f` | สลับโหมดกรอง **เฉพาะไฟล์รูปภาพ** / **ไฟล์ทั้งหมด** |
+| `l` / `→` / `Enter` | เข้าโฟลเดอร์, ดูรูปเต็มจอ, แก้ไขไฟล์ Text ด้วย `vi`, หรือเล่น `.mp3`/`.mp4` ใน Terminal |
+| `,` + `n/N`, `a/A`, `m/M`, `s/S`, `e/E`, `d` | เมนูเรียงลำดับสไตล์ Yazi (Natural, Alpha, Modified, Size, Ext, สลับ Dirs-first) |
+| `f` | กรองชื่อไฟล์แบบ Real-time ในโฟลเดอร์ปัจจุบัน (กด `Esc` เพื่อล้าง) |
+| `t` | สลับประเภทไฟล์ที่แสดง (**All Files** / **Dirs+Images** / **Dirs Only**) |
+| `/` / `?` | ค้นหาไฟล์ไปข้างหน้า / ย้อนกลับในโฟลเดอร์ปัจจุบัน (Smart-case) |
+| `n` / `N` | ไปยังผลการค้นหาถัดไป / ก่อนหน้า |
+| `s` | ค้นหาไฟล์ข้ามโฟลเดอร์ย่อยทั้งหมด (`↑`/`↓` เลือก, `Enter` กระโดดไปที่ไฟล์) |
 | `.` | แสดง / ซ่อนไฟล์ที่ซ่อนอยู่ (Hidden files) |
 | `Space` | เลือก/ยกเลิกการเลือกไฟล์ แล้วเลื่อนลง |
 | `Ctrl+a` | เลือกไฟล์ทั้งหมดในโฟลเดอร์ |
 | `Ctrl+r` | สลับรายการที่เลือก (Invert selection) |
-| `Esc` | ล้างรายการที่เลือกและข้อมูลใน Clipboard |
+| `Esc` | ล้างตัวกรองชื่อไฟล์ หรือล้างรายการที่เลือกและ Clipboard |
 | `y` | คัดลอกไฟล์ที่เลือก (Copy) |
 | `x` | ตัดไฟล์ที่เลือกเพื่อย้าย (Cut) |
 | `p` / `P` | วางไฟล์ (`p` เปลี่ยนชื่ออัตโนมัติถ้าชื่อซ้ำ, `P` เขียนทับไฟล์เดิม) |
@@ -211,8 +227,6 @@ vie -p sixel /path/to/photos
 | `r` | เปลี่ยนชื่อไฟล์หรือโฟลเดอร์ปัจจุบัน |
 | `d` | ย้ายไฟล์ที่เลือกไปไว้ในถังขยะของระบบ (Trash) |
 | `D` | ลบไฟล์ที่เลือกแบบถาวร (Permanent Delete) |
-| `/` | ค้นหาไฟล์ในโฟลเดอร์ปัจจุบัน |
-| `n` / `N` | ไปยังผลการค้นหาถัดไป / ก่อนหน้า |
 | `q` / `Ctrl+c` | ออกจากโปรแกรม |
 
 #### โหมดดูรูปเต็มจอ (Fullscreen Viewer Mode)
