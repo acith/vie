@@ -5,6 +5,22 @@
 
 ---
 
+## 📸 Screenshots / ภาพตัวอย่างการใช้งาน
+
+### 1. 3-Column Browser Mode & Live Image Preview (โหมดสำรวจไฟล์ 3 คอลัมน์พร้อมพรีวิวรูปภาพ)
+![Browser Mode and Live Image Preview](assets/1-browser-preview.png)
+
+### 2. Fullscreen Image Viewer Mode (โหมดดูรูปภาพเต็มหน้าจอ)
+![Fullscreen Image Viewer Mode](assets/2-fullscreen-viewer.png)
+
+### 3. Yazi-Style File Management: Multi-Select, Copy/Cut & Trash (การเลือกหลายไฟล์ คัดลอก/ตัด และย้ายลงถังขยะ)
+![File Management and Modal Popup](assets/3-file-management.png)
+
+### 4. Quick Search, Filter Modes & Halfblocks Fallback (การค้นหา กรองไฟล์ และโหมด Halfblocks สำหรับ Terminal ทั่วไป)
+![Halfblocks Protocol and Quick Search](assets/4-search-and-halfblocks.png)
+
+---
+
 ## 🇬🇧 English
 
 ### Overview
@@ -27,6 +43,17 @@
 
 ### Installation
 
+#### Option 1: Download Prebuilt Binary (No Rust required)
+Download the latest prebuilt binary for your OS (Linux, macOS, Windows) from the [**GitHub Releases**](https://github.com/acith/vie/releases) page:
+
+```bash
+# Example for Linux (x86_64 static binary)
+tar -xzf vie-v0.10-x86_64-unknown-linux-musl.tar.gz
+chmod +x vie
+sudo mv vie /usr/local/bin/
+```
+
+#### Option 2: Build from Source (Cargo)
 ```bash
 git clone https://github.com/acith/vie.git
 cd vie
@@ -38,6 +65,9 @@ Make sure `~/.cargo/bin` is in your `PATH`.
 ### Usage
 
 ```bash
+# Show current version and exit
+vie --version
+
 # Open current directory
 vie
 
@@ -112,6 +142,17 @@ vie -p sixel /path/to/photos
 
 ### การติดตั้ง (Installation)
 
+#### วิธีที่ 1: ดาวน์โหลดไฟล์ Binary สำเร็จรูป (ไม่ต้องติดตั้ง Rust หรือ Build เอง)
+สามารถดาวน์โหลดไฟล์ที่คอมไพล์เสร็จแล้วสำหรับ Linux, macOS และ Windows ได้ที่หน้า [**GitHub Releases**](https://github.com/acith/vie/releases):
+
+```bash
+# ตัวอย่างสำหรับ Linux (x86_64 Static Binary รันได้ทุก Distro)
+tar -xzf vie-v0.10-x86_64-unknown-linux-musl.tar.gz
+chmod +x vie
+sudo mv vie /usr/local/bin/
+```
+
+#### วิธีที่ 2: Build จาก Source Code ด้วย Cargo
 ```bash
 git clone https://github.com/acith/vie.git
 cd vie
@@ -123,6 +164,9 @@ cargo install --path .
 ### การใช้งาน (Usage)
 
 ```bash
+# ตรวจสอบเวอร์ชันปัจจุบันของโปรแกรม
+vie --version
+
 # เปิดโฟลเดอร์ปัจจุบัน
 vie
 
