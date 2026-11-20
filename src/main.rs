@@ -37,7 +37,7 @@ enum CliProtocol {
 #[derive(Parser, Debug)]
 #[command(
     name = "vie",
-    version = "0.12",
+    version = "0.13",
     about = "Fast Yazi-style terminal image viewer (supports Ghostty/Kitty, Foot/Sixel, iTerm2, Halfblocks)"
 )]
 struct Cli {
@@ -146,9 +146,10 @@ fn run_loop(
                         app.reload_directories(Some(&path));
                     }
                 }
-                PendingAction::PlayAudio(path) => {
-                    if let Err(err) = media::play_audio(terminal, &path) {
-                        app.set_error(err);
+                PendingAction::PlayAudio { playlist, index } => {
+                    match media::play_audio(terminal, &playlist, index) {
+                        Ok(last_path) => app.select_path_if_present(&last_path),
+                        Err(err) => app.set_error(err),
                     }
                 }
                 PendingAction::PlayVideo(path) => {

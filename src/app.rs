@@ -67,7 +67,10 @@ pub enum Popup {
 #[derive(Debug, Clone)]
 pub enum PendingAction {
     EditText(PathBuf),
-    PlayAudio(PathBuf),
+    PlayAudio {
+        playlist: Vec<PathBuf>,
+        index: usize,
+    },
     PlayVideo(PathBuf),
 }
 
@@ -254,6 +257,13 @@ impl App {
         self.entries.get(self.selected)
     }
 
+    pub fn select_path_if_present(&mut self, path: &Path) {
+        if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
+            self.selected = idx;
+            self.on_selection_changed();
+        }
+    }
+
     pub fn current_viewer_entry(&self) -> Option<&FileEntry> {
         self.viewer_images.get(self.viewer_index)
     }
@@ -378,7 +388,17 @@ impl App {
         } else if entry.is_image {
             self.enter_viewer_for_path(&entry.path);
         } else if entry.is_audio {
-            self.pending_action = Some(PendingAction::PlayAudio(entry.path));
+            let playlist: Vec<PathBuf> = self
+                .entries
+                .iter()
+                .filter(|e| e.is_audio)
+                .map(|e| e.path.clone())
+                .collect();
+            let index = playlist
+                .iter()
+                .position(|p| p == &entry.path)
+                .unwrap_or(0);
+            self.pending_action = Some(PendingAction::PlayAudio { playlist, index });
         } else if entry.is_video {
             self.pending_action = Some(PendingAction::PlayVideo(entry.path));
         } else if fs::is_text_file(&entry.path) {
