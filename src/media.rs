@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use image::imageops::FilterType;
 use image::{DynamicImage, RgbImage};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Size};
@@ -154,7 +155,9 @@ fn probe_video_dimensions(path: &Path) -> Option<(u32, u32)> {
 fn spawn_audio_process(path: &Path, video_disabled: bool) -> Result<Child, String> {
     let input = ffmpeg_input_arg(path);
     let mut ffplay = Command::new("ffplay");
-    ffplay.args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
+    ffplay
+        .env("PULSE_LATENCY_MSEC", "150")
+        .args(["-nodisp", "-autoexit", "-loglevel", "quiet"]);
     if video_disabled {
         ffplay.arg("-vn");
     }
@@ -170,7 +173,8 @@ fn spawn_audio_process(path: &Path, video_disabled: bool) -> Result<Child, Strin
     }
 
     let mut mpv = Command::new("mpv");
-    mpv.args(["--no-video", "--really-quiet"])
+    mpv.env("PULSE_LATENCY_MSEC", "150")
+        .args(["--no-video", "--really-quiet"])
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -180,7 +184,8 @@ fn spawn_audio_process(path: &Path, video_disabled: bool) -> Result<Child, Strin
     }
 
     let mut cvlc = Command::new("cvlc");
-    cvlc.args(["--play-and-exit", "--no-video", "--quiet"])
+    cvlc.env("PULSE_LATENCY_MSEC", "150")
+        .args(["--play-and-exit", "--no-video", "--quiet"])
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -281,114 +286,121 @@ pub fn play_audio(
             .unwrap_or_else(|| "AUDIO".to_string());
 
         let start = Instant::now();
+        let mut last_draw = Instant::now() - Duration::from_secs(1);
+        let mut needs_redraw = true;
         let mut tick: usize = 0;
 
         loop {
-            let elapsed = start.elapsed().as_secs_f64();
-            let ratio = duration
-                .map(|d| (elapsed / d).clamp(0.0, 1.0))
-                .unwrap_or(0.0);
-            let time_label = match duration {
-                Some(d) => format!("{} / {}", format_mm_ss(elapsed.min(d)), format_mm_ss(d)),
-                None => format!("{} / --:--", format_mm_ss(elapsed)),
-            };
+            if needs_redraw || last_draw.elapsed() >= Duration::from_millis(500) {
+                let elapsed = start.elapsed().as_secs_f64();
+                let ratio = duration
+                    .map(|d| (elapsed / d).clamp(0.0, 1.0))
+                    .unwrap_or(0.0);
+                let time_label = match duration {
+                    Some(d) => format!("{} / {}", format_mm_ss(elapsed.min(d)), format_mm_ss(d)),
+                    None => format!("{} / --:--", format_mm_ss(elapsed)),
+                };
 
-            let eq = eq_heights[tick % eq_heights.len()];
-            tick = tick.wrapping_add(1);
+                let eq = eq_heights[tick % eq_heights.len()];
+                tick = tick.wrapping_add(1);
 
-            let track_pos = format!("{}/{}", current_idx + 1, playlist.len());
-            let (mode_label, mode_color) = if shuffle {
-                ("Shuffle", Color::Magenta)
-            } else {
-                ("Sequential", Color::Green)
-            };
+                let track_pos = format!("{}/{}", current_idx + 1, playlist.len());
+                let (mode_label, mode_color) = if shuffle {
+                    ("Shuffle", Color::Magenta)
+                } else {
+                    ("Sequential", Color::Green)
+                };
 
-            terminal
-                .draw(|frame| {
-                    let area = frame.area();
-                    let box_w = area.width.min(72).max(40);
-                    let box_h = 12.min(area.height);
-                    let rect = center_rect(area, Size::new(box_w, box_h));
+                terminal
+                    .draw(|frame| {
+                        let area = frame.area();
+                        let box_w = area.width.min(72).max(40);
+                        let box_h = 12.min(area.height);
+                        let rect = center_rect(area, Size::new(box_w, box_h));
 
-                    let block = Block::default()
-                        .title(" 🎵 Terminal Audio Player ")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(Color::Cyan));
-                    let inner = block.inner(rect);
-                    frame.render_widget(block, rect);
+                        let block = Block::default()
+                            .title(" 🎵 Terminal Audio Player ")
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(Color::Cyan));
+                        let inner = block.inner(rect);
+                        frame.render_widget(block, rect);
 
-                    let rows = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Length(1),
-                            Constraint::Length(1),
-                            Constraint::Length(2),
-                            Constraint::Length(2),
-                            Constraint::Length(1),
-                            Constraint::Min(1),
+                        let rows = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([
+                                Constraint::Length(1),
+                                Constraint::Length(1),
+                                Constraint::Length(2),
+                                Constraint::Length(2),
+                                Constraint::Length(1),
+                                Constraint::Min(1),
+                            ])
+                            .split(inner);
+
+                        let meta_line = Paragraph::new(Line::from(vec![
+                            Span::styled(
+                                format!(" Track {track_pos} "),
+                                Style::default()
+                                    .fg(Color::Black)
+                                    .bg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw("  "),
+                            Span::styled(
+                                format!(" {mode_label} "),
+                                Style::default()
+                                    .fg(Color::Black)
+                                    .bg(mode_color)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("  [{ext_label} • {}]", fs::format_size(file_size)),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]))
+                        .alignment(Alignment::Center);
+                        frame.render_widget(meta_line, rows[0]);
+
+                        let title = Paragraph::new(Line::from(Span::styled(
+                            file_name.as_str(),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        )))
+                        .alignment(Alignment::Center);
+                        frame.render_widget(title, rows[1]);
+
+                        let visualizer = Paragraph::new(vec![
+                            Line::from(Span::styled(eq[0], Style::default().fg(Color::Cyan))),
+                            Line::from(Span::styled(eq[1], Style::default().fg(Color::Blue))),
                         ])
-                        .split(inner);
+                        .alignment(Alignment::Center);
+                        frame.render_widget(visualizer, rows[2]);
 
-                    let meta_line = Paragraph::new(Line::from(vec![
-                        Span::styled(
-                            format!(" Track {track_pos} "),
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(Color::Yellow)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(
-                            format!(" {mode_label} "),
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(mode_color)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            format!("  [{ext_label} • {}]", fs::format_size(file_size)),
+                        let gauge = Gauge::default()
+                            .block(Block::default())
+                            .gauge_style(
+                                Style::default()
+                                    .fg(Color::Green)
+                                    .bg(Color::DarkGray)
+                                    .add_modifier(Modifier::BOLD),
+                            )
+                            .ratio(ratio)
+                            .label(time_label.as_str());
+                        frame.render_widget(gauge, rows[3]);
+
+                        let hint = Paragraph::new(Line::from(Span::styled(
+                            "n/→:next  p/←:prev  s:shuffle/seq  q/Esc:stop & return",
                             Style::default().fg(Color::DarkGray),
-                        ),
-                    ]))
-                    .alignment(Alignment::Center);
-                    frame.render_widget(meta_line, rows[0]);
+                        )))
+                        .alignment(Alignment::Center);
+                        frame.render_widget(hint, rows[5]);
+                    })
+                    .map_err(|e| e.to_string())?;
 
-                    let title = Paragraph::new(Line::from(Span::styled(
-                        file_name.as_str(),
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    )))
-                    .alignment(Alignment::Center);
-                    frame.render_widget(title, rows[1]);
-
-                    let visualizer = Paragraph::new(vec![
-                        Line::from(Span::styled(eq[0], Style::default().fg(Color::Cyan))),
-                        Line::from(Span::styled(eq[1], Style::default().fg(Color::Blue))),
-                    ])
-                    .alignment(Alignment::Center);
-                    frame.render_widget(visualizer, rows[2]);
-
-                    let gauge = Gauge::default()
-                        .block(Block::default())
-                        .gauge_style(
-                            Style::default()
-                                .fg(Color::Green)
-                                .bg(Color::DarkGray)
-                                .add_modifier(Modifier::BOLD),
-                        )
-                        .ratio(ratio)
-                        .label(time_label.as_str());
-                    frame.render_widget(gauge, rows[3]);
-
-                    let hint = Paragraph::new(Line::from(Span::styled(
-                        "n/→:next  p/←:prev  s:shuffle/seq  q/Esc:stop & return",
-                        Style::default().fg(Color::DarkGray),
-                    )))
-                    .alignment(Alignment::Center);
-                    frame.render_widget(hint, rows[5]);
-                })
-                .map_err(|e| e.to_string())?;
+                last_draw = Instant::now();
+                needs_redraw = false;
+            }
 
             // Track finished naturally -> advance to next track automatically
             if !guard.is_running() {
@@ -400,7 +412,7 @@ pub fn play_audio(
                 continue 'playlist_loop;
             }
 
-            if event::poll(Duration::from_millis(120)).map_err(|e| e.to_string())? {
+            if event::poll(Duration::from_millis(80)).map_err(|e| e.to_string())? {
                 if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
                     if key.kind != KeyEventKind::Release {
                         let is_ctrl_c = key.modifiers.contains(KeyModifiers::CONTROL)
@@ -438,6 +450,7 @@ pub fn play_audio(
                             }
                             KeyCode::Char('s') => {
                                 shuffle = !shuffle;
+                                needs_redraw = true;
                             }
                             _ => {}
                         }
@@ -455,6 +468,7 @@ pub fn play_video(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     picker: &Picker,
     path: &Path,
+    lite_mode: bool,
 ) -> Result<(), String> {
     let input = ffmpeg_input_arg(path);
     let (src_w, src_h) = probe_video_dimensions(path).unwrap_or((640, 360));
@@ -464,9 +478,12 @@ pub fn play_video(
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string());
 
-    // Scale video frame resolution for responsive real-time terminal encoding
-    let max_w: u32 = 420;
-    let max_h: u32 = 240;
+    // Scale video frame resolution & FPS for smooth playback even on low-spec CPUs
+    let (max_w, max_h, fps): (u32, u32, &str) = if lite_mode {
+        (240, 136, "8")
+    } else {
+        (320, 180, "10")
+    };
     let scale = (max_w as f64 / src_w as f64)
         .min(max_h as f64 / src_h as f64)
         .min(1.0);
@@ -480,13 +497,15 @@ pub fn play_video(
     );
 
     let mut ffmpeg = Command::new("ffmpeg")
-        .args(["-loglevel", "quiet", "-re", "-i"])
+        .args(["-loglevel", "quiet", "-flags2", "fast", "-re", "-i"])
         .arg(&input)
         .args([
+            "-sws_flags",
+            "fast_bilinear",
             "-vf",
             &format!("scale={out_w}:{out_h}"),
             "-r",
-            "12",
+            fps,
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -505,13 +524,16 @@ pub fn play_video(
         .ok_or_else(|| "Failed to capture ffmpeg video stream".to_string())?;
     let mut ffmpeg_guard = ChildGuard::new(Some(ffmpeg));
 
-    // Spawn background audio track (no window)
+    // Spawn background audio track (no window, with generous buffer via PULSE_LATENCY_MSEC)
     let audio_child = spawn_audio_process(path, true).ok();
     let mut audio_guard = ChildGuard::new(audio_child);
 
     let stop_flag = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop_flag);
-    let worker_picker = picker.clone();
+    let fast_halfblocks = Arc::new(AtomicBool::new(lite_mode));
+    let worker_fast = Arc::clone(&fast_halfblocks);
+    let hd_picker = picker.clone();
+    let lite_picker = Picker::halfblocks();
 
     let (frame_tx, frame_rx) = mpsc::sync_channel::<Protocol>(1);
 
@@ -526,9 +548,16 @@ pub fn play_video(
             }
             if let Some(rgb) = RgbImage::from_raw(out_w, out_h, buf.clone()) {
                 let dyn_img = DynamicImage::ImageRgb8(rgb);
-                if let Ok(proto) =
-                    worker_picker.new_protocol(dyn_img, render_target, Resize::Scale(None))
-                {
+                let active_picker = if worker_fast.load(Ordering::Relaxed) {
+                    &lite_picker
+                } else {
+                    &hd_picker
+                };
+                if let Ok(proto) = active_picker.new_protocol(
+                    dyn_img,
+                    render_target,
+                    Resize::Scale(Some(FilterType::Nearest)),
+                ) {
                     let _ = frame_tx.try_send(proto);
                 }
             }
@@ -551,6 +580,11 @@ pub fn play_video(
         let time_str = match duration {
             Some(d) => format!("{} / {}", format_mm_ss(elapsed.min(d)), format_mm_ss(d)),
             None => format_mm_ss(elapsed),
+        };
+        let mode_tag = if fast_halfblocks.load(Ordering::Relaxed) {
+            "Fast"
+        } else {
+            "HD"
         };
 
         if got_new_frame || current_frame.is_none() {
@@ -594,19 +628,19 @@ pub fn play_video(
                                     .add_modifier(Modifier::BOLD),
                             ),
                             Span::styled(
-                                format!("  [{time_str}]  ({src_w}x{src_h})"),
+                                format!("  [{time_str}]  [{mode_tag}]"),
                                 Style::default().fg(Color::Cyan),
                             ),
                         ]);
 
                         let right = Line::from(Span::styled(
-                            "i:toggle bar  q/Esc:stop & return ",
+                            "m:Fast/HD  i:bar  q/Esc:stop ",
                             Style::default().fg(Color::DarkGray),
                         ));
 
                         let bar = Layout::default()
                             .direction(Direction::Horizontal)
-                            .constraints([Constraint::Min(10), Constraint::Length(35)])
+                            .constraints([Constraint::Min(10), Constraint::Length(30)])
                             .split(bar_rect);
 
                         frame.render_widget(Paragraph::new(left), bar[0]);
@@ -619,7 +653,7 @@ pub fn play_video(
                 .map_err(|e| e.to_string())?;
         }
 
-        if event::poll(Duration::from_millis(16)).map_err(|e| e.to_string())? {
+        if event::poll(Duration::from_millis(40)).map_err(|e| e.to_string())? {
             if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
                 if key.kind != KeyEventKind::Release {
                     let is_ctrl_c = key.modifiers.contains(KeyModifiers::CONTROL)
@@ -628,6 +662,10 @@ pub fn play_video(
                         break;
                     } else if key.code == KeyCode::Char('i') {
                         show_bar = !show_bar;
+                        let _ = terminal.clear();
+                    } else if key.code == KeyCode::Char('m') {
+                        let prev = fast_halfblocks.load(Ordering::Relaxed);
+                        fast_halfblocks.store(!prev, Ordering::Relaxed);
                         let _ = terminal.clear();
                     }
                 }

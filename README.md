@@ -61,7 +61,7 @@ Download the latest prebuilt binary for your OS (Linux, macOS, Windows) from the
 
 ```bash
 # Example for Linux (x86_64 static binary)
-tar -xzf vie-v0.13-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.14-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```
@@ -91,6 +91,9 @@ vie /path/to/image.png
 # Force a specific graphics protocol (auto, kitty, sixel, iterm2, halfblocks)
 vie --protocol kitty
 vie -p sixel /path/to/photos
+
+# Low-CPU mode for Chromebooks / low-spec hardware (uses fast Halfblocks video & 8 FPS)
+vie --lite
 ```
 
 ### Keybindings
@@ -178,7 +181,7 @@ vie -p sixel /path/to/photos
 
 ```bash
 # ตัวอย่างสำหรับ Linux (x86_64 Static Binary รันได้ทุก Distro)
-tar -xzf vie-v0.13-x86_64-unknown-linux-musl.tar.gz
+tar -xzf vie-v0.14-x86_64-unknown-linux-musl.tar.gz
 chmod +x vie
 sudo mv vie /usr/local/bin/
 ```
@@ -208,6 +211,9 @@ vie /path/to/image.png
 # บังคับเลือกโปรโตคอลแสดงผลรูปภาพ (auto, kitty, sixel, iterm2, halfblocks)
 vie --protocol kitty
 vie -p sixel /path/to/photos
+
+# โหมดประหยัด CPU สำหรับ Chromebook หรือเครื่องสเปกต่ำ (วิดีโอแบบ Fast Halfblocks 8 FPS)
+vie --lite
 ```
 
 ### ปุ่มลัด (Keybindings)

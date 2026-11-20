@@ -37,7 +37,7 @@ enum CliProtocol {
 #[derive(Parser, Debug)]
 #[command(
     name = "vie",
-    version = "0.13",
+    version = "0.14",
     about = "Fast Yazi-style terminal image viewer (supports Ghostty/Kitty, Foot/Sixel, iTerm2, Halfblocks)"
 )]
 struct Cli {
@@ -48,6 +48,10 @@ struct Cli {
     /// Force a specific terminal graphics protocol
     #[arg(short, long, value_enum, default_value_t = CliProtocol::Auto)]
     protocol: CliProtocol,
+
+    /// Low-CPU mode for low-spec devices (Chromebooks, etc.)
+    #[arg(long, default_value_t = false)]
+    lite: bool,
 }
 
 fn clear_kitty_graphics() {
@@ -120,7 +124,7 @@ fn main() -> Result<()> {
     let loader = ImageLoader::new(picker.clone());
     let mut app = App::new(cli.path, loader, protocol_type);
 
-    let res = run_loop(&mut terminal, &mut app, &picker);
+    let res = run_loop(&mut terminal, &mut app, &picker, cli.lite);
 
     restore_terminal(Some(protocol_type));
     res
@@ -130,6 +134,7 @@ fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     picker: &Picker,
+    lite_mode: bool,
 ) -> Result<()> {
     let mut needs_redraw = true;
 
@@ -153,7 +158,7 @@ fn run_loop(
                     }
                 }
                 PendingAction::PlayVideo(path) => {
-                    if let Err(err) = media::play_video(terminal, picker, &path) {
+                    if let Err(err) = media::play_video(terminal, picker, &path, lite_mode) {
                         app.set_error(err);
                     }
                 }
